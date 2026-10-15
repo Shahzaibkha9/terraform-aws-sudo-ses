@@ -1,61 +1,52 @@
 locals {
-  domain_dkim_tokens = local.enable_dkim == 1 ? module.ses.dkim_tokens : []
-  enable_dkim        = var.enable_dkim == true && var.domain_identity != "" ? 1 : 0
-  zone_name          = var.zone_name != "" ? var.zone_name : var.domain_identity
+  zone_name      = var.zone_name != null ? var.zone_name : var.domain_identity
+  dkim_tokens    = module.ses.dkim_tokens
 }
 
-data "aws_route53_zone" "ses_domain_validation_zone" {
-  count    = var.domain_identity != "" ? 1 : 0
+data "aws_route53_zone" "zone" {
   name     = local.zone_name
   provider = aws.route53
 }
 
-module "ses" {
-  source           = "../../"
-  domain_identity  = var.domain_identity
-  email_identity   = var.email_identity
-  enable_dkim      = var.enable_dkim
-  mail_from_domain = var.mail_from_domain
-}
-
-resource "aws_route53_record" "route53_ses_domain-validation" {
-  count    = var.domain_identity != "" && var.external_domain_validation != true ? 1 : 0
-  zone_id  = data.aws_route53_zone.ses_domain_validation_zone[0].zone_id
-  name     = "_amazonses.${var.domain_identity}"
-  type     = "TXT"
-  ttl      = "300"
-  records  = [module.ses.verification_token]
-  provider = aws.route53
-}
-resource "aws_route53_record" "route53_ses_dkim_validation" {
-  count   = local.enable_dkim == 1 ? 3 : 0
-  zone_id = data.aws_route53_zone.ses_domain_validation_zone[0].zone_id
-  name    = "${element(local.domain_dkim_tokens, count.index)}._domainkey.${var.domain_identity}"
-  type    = "CNAME"
-  records = ["${element(local.domain_dkim_tokens, count.index)}.dkim.amazonses.com"]
-  ttl     = "600"
-
-  provider = aws.route53
-}
 data "aws_region" "current" {}
 
-resource "aws_route53_record" "route53_ses_domain_mail_from_mx" {
-  count   = var.domain_identity != "" ? 1 : 0
-  zone_id = data.aws_route53_zone.ses_domain_validation_zone[0].zone_id
-  name    = module.ses.mail_from_domain
-  type    = "MX"
-  ttl     = "600"
-  records = ["10 feedback-smtp.${data.aws_region.current.name}.amazonses.com"]
+module "ses" {
+  source                  = "../../"
+  domain_identity         = var.domain_identity
+  email_identity          = var.email_identity
+  enable_dkim             = var.enable_dkim
+  dkim_signing_key_length = var.dkim_signing_key_length
+  mail_from_domain        = var.mail_from_domain
+  behavior_on_mx_failure  = var.behavior_on_mx_failure
+  enable_notifications    = var.enable_notifications
+  tags                    = var.tags
+}
 
+# SESv2 uses DKIM CNAME records for both verification and signing — no separate TXT record needed
+resource "aws_route53_record" "dkim" {
+  count    = var.enable_dkim ? 3 : 0
+  zone_id  = data.aws_route53_zone.zone.zone_id
+  name     = "${local.dkim_tokens[count.index]}._domainkey.${var.domain_identity}"
+  type     = "CNAME"
+  ttl      = 600
+  records  = ["${local.dkim_tokens[count.index]}.dkim.amazonses.com"]
   provider = aws.route53
 }
-resource "aws_route53_record" "route53_ses_domain_mail_from_txt" {
-  count   = var.domain_identity != "" ? 1 : 0
-  zone_id = data.aws_route53_zone.ses_domain_validation_zone[0].zone_id
-  name    = module.ses.mail_from_domain
-  type    = "TXT"
-  ttl     = "600"
-  records = ["v=spf1 include:amazonses.com -all"]
 
+resource "aws_route53_record" "mail_from_mx" {
+  zone_id  = data.aws_route53_zone.zone.zone_id
+  name     = module.ses.mail_from_domain
+  type     = "MX"
+  ttl      = 600
+  records  = ["10 feedback-smtp.${data.aws_region.current.region}.amazonses.com"]
+  provider = aws.route53
+}
+
+resource "aws_route53_record" "mail_from_spf" {
+  zone_id  = data.aws_route53_zone.zone.zone_id
+  name     = module.ses.mail_from_domain
+  type     = "TXT"
+  ttl      = 600
+  records  = ["v=spf1 include:amazonses.com -all"]
   provider = aws.route53
 }

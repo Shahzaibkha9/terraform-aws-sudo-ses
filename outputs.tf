@@ -1,15 +1,29 @@
 output "domain_identity_arn" {
-  value = var.domain_identity != "" ? aws_ses_domain_identity.ses_domain_identity[0].arn : ""
-}
-output "verification_token" {
-  value = var.domain_identity != "" ? aws_ses_domain_identity.ses_domain_identity[0].verification_token : ""
+  value       = try(aws_sesv2_email_identity.domain[0].arn, null)
+  description = "ARN of the SES domain identity."
 }
 
 output "dkim_tokens" {
-  value = local.enable_dkim == 1 ? aws_ses_domain_dkim.ses_dkim_validation[0].dkim_tokens : []
+  value       = try(aws_sesv2_email_identity.domain[0].dkim_signing_attributes[0].tokens, [])
+  description = "DKIM tokens to publish as CNAME DNS records (also serve as domain verification)."
 }
 
 output "mail_from_domain" {
+  value       = try(aws_sesv2_email_identity_mail_from_attributes.mail_from[0].mail_from_domain, null)
+  description = "The MAIL FROM domain used for bounce handling."
+}
 
-  value = var.domain_identity != "" ? aws_ses_domain_mail_from.ses_mail_from_domain[0].mail_from_domain : ""
+output "email_identity_arn" {
+  value       = try(aws_sesv2_email_identity.email[0].arn, null)
+  description = "ARN of the SES email identity."
+}
+
+output "configuration_set_name" {
+  value       = try(aws_sesv2_configuration_set.config[0].configuration_set_name, null)
+  description = "Name of the SES configuration set (null if enable_notifications is false)."
+}
+
+output "notifications_topic_arn" {
+  value       = try(aws_sns_topic.notifications[0].arn, null)
+  description = "ARN of the SNS topic for bounce and complaint notifications (null if enable_notifications is false)."
 }
